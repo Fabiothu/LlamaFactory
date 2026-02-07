@@ -688,7 +688,7 @@ register_template(
     default_system="You are a helpful assistant.",
     stop_words=["<|im_end|>", "<|endoftext|>", "</think>"], 
     replace_eos=True,
-    # mm_plugin=get_mm_plugin(name="bee"),
+    mm_plugin=get_mm_plugin(name="bee"),
 )
 
 register_template(
