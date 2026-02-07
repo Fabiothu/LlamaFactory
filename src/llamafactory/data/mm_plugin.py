@@ -1730,6 +1730,34 @@ class Qwen3VLPlugin(Qwen2VLPlugin):
         return messages
 
 
+class BeePlugin(Qwen2VLPlugin):
+    def __init__(self, image_token: str, video_token: str, audio_token: str, **kwargs):
+        super().__init__(image_token, video_token, audio_token, **kwargs)
+        self.support_image = True
+        self.expand_mm_tokens = True
+
+    def _validate_input(self, processor, images, videos, audios):
+        if images and processor is None:
+            raise ValueError("Processor is required for image input.")
+
+    def process_messages(self, messages, images, videos, audios, processor):
+        if images and processor is not None:
+            image_processor = getattr(processor, "image_processor", processor)
+            merge_length = getattr(image_processor, "merge_size", 2) ** 2
+            
+            new_messages = deepcopy(messages)
+            img_idx = 0
+            for msg in new_messages:
+                if "<image>" in msg["content"]:
+                    grid = image_processor.make_grid_thw(images[img_idx])
+                    image_tokens_len = (grid[1] * grid[2]) // merge_length
+                    image_placeholder = "<|vision_start|>" + "<|image_pad|>" * image_tokens_len + "<|vision_end|>"
+                    msg["content"] = msg["content"].replace("<image>", image_placeholder, 1)
+                    img_idx += 1
+            return new_messages
+        
+        return messages
+    
 @dataclass
 class GLM4VPlugin(Qwen2VLPlugin):
     @override
@@ -2195,6 +2223,7 @@ class YoutuVLPlugin(BasePlugin):
 
 PLUGINS = {
     "base": BasePlugin,
+    "bee": BeePlugin,
     "ernie_vl": ErnieVLPlugin,
     "gemma3": Gemma3Plugin,
     "glm4v": GLM4VPlugin,

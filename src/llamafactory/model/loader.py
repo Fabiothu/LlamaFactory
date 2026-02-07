@@ -75,19 +75,38 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
     Note: including inplace operation of model_args.
     """
     init_kwargs = _get_init_kwargs(model_args)
+    config = load_config(model_args)
+    if getattr(config, "model_type", None) == "Bee":
+        try:
+            from transformers import AutoProcessor
+            processor = AutoProcessor.from_pretrained(
+                model_args.model_name_or_path,
+                trust_remote_code=True,
+                **init_kwargs,
+            )
+            tokenizer = processor.tokenizer
+            tokenizer.pad_token_id = getattr(config, "pad_token_id", 151643)
+            tokenizer.eos_token_id = getattr(config, "eos_token_id", 151645)
+            if hasattr(processor, "image_processor"):
+                if not hasattr(processor.image_processor, "merge_size"):
+                    setattr(processor.image_processor, "merge_size", 2)
+            setattr(tokenizer, "processor", processor)
+            return {"tokenizer": tokenizer, "processor": processor}
+        except Exception as e:
+            logger.warning_rank0(f"Failed to load processor for Bee: {e}")
     try:
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             use_fast=model_args.use_fast_tokenizer,
             split_special_tokens=model_args.split_special_tokens,
-            padding_side="right",
+            padding_side="left",
             **init_kwargs,
         )
     except ValueError:  # try another one
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             use_fast=not model_args.use_fast_tokenizer,
-            padding_side="right",
+            padding_side="left",
             **init_kwargs,
         )
     except Exception as e:
@@ -119,6 +138,11 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
 
     if processor is not None:
         patch_processor(processor, tokenizer, model_args)
+        image_processor = getattr(processor, "image_processor", None)
+        if image_processor is not None:
+            if not hasattr(image_processor, "merge_size"):
+                setattr(image_processor, "merge_size", 2)
+                logger.info_rank0("Successfully patched image_processor with merge_size=2")
 
     return {"tokenizer": tokenizer, "processor": processor}
 
@@ -126,7 +150,12 @@ def load_tokenizer(model_args: "ModelArguments") -> "TokenizerModule":
 def load_config(model_args: "ModelArguments") -> "PretrainedConfig":
     r"""Load model config."""
     init_kwargs = _get_init_kwargs(model_args)
-    return AutoConfig.from_pretrained(model_args.model_name_or_path, **init_kwargs)
+    init_kwargs.pop("trust_remote_code", None) # 防止获得多个同一参数
+    return AutoConfig.from_pretrained(
+        model_args.model_name_or_path, 
+        trust_remote_code=True,
+        **init_kwargs
+        )
 
 
 def load_model(
@@ -175,7 +204,8 @@ def load_model(
             if model_args.train_from_scratch:
                 model = load_class.from_config(config, trust_remote_code=model_args.trust_remote_code)
             else:
-                model = load_class.from_pretrained(**init_kwargs)
+                init_kwargs.pop("trust_remote_code", None)
+                model = load_class.from_pretrained(trust_remote_code=True, **init_kwargs)
                 if getattr(model.config, "model_type", None) in ["qwen2_5_omni", "qwen3_omni_moe"]:
                     model = getattr(model, "thinker")
 

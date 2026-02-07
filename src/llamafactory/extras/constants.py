@@ -184,6 +184,16 @@ register_model_group(
 
 register_model_group(
     models={
+        "Bee-8B": {
+            DownloadSource.DEFAULT: "Open-Bee/Bee-8B-RL",
+        },
+    },
+    template="Bee",
+    multimodal=True,
+)
+
+register_model_group(
+    models={
         "BLOOM-560M": {
             DownloadSource.DEFAULT: "bigscience/bloom-560m",
             DownloadSource.MODELSCOPE: "AI-ModelScope/bloom-560m",
