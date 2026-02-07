@@ -1731,6 +1731,8 @@ class Qwen3VLPlugin(Qwen2VLPlugin):
 
 
 class BeePlugin(Qwen2VLPlugin):
+    r"""Plugin for Bee (Open-Bee/Bee-8B-RL). Bee has no make_grid_thw; use processor._get_num_multimodal_tokens."""
+
     def __init__(self, image_token: str, video_token: str, audio_token: str, **kwargs):
         super().__init__(image_token, video_token, audio_token, **kwargs)
         self.support_image = True
@@ -1740,24 +1742,59 @@ class BeePlugin(Qwen2VLPlugin):
         if images and processor is None:
             raise ValueError("Processor is required for image input.")
 
+    @override
+    def _get_mm_inputs(
+        self,
+        images: list["ImageInput"],
+        videos: list["VideoInput"],
+        audios: list["AudioInput"],
+        processor: "MMProcessor",
+    ) -> dict[str, "torch.Tensor"]:
+        """Bee returns pixel_values, image_sizes, batch_num_images (no image_grid_thw)."""
+        image_processor: BaseImageProcessor = getattr(processor, "image_processor", None)
+        mm_inputs: dict = {}
+        if len(images) != 0 and image_processor is not None:
+            images = self._regularize_images(
+                images,
+                image_max_pixels=getattr(processor, "image_max_pixels", 2304 * 2304),
+                image_min_pixels=getattr(processor, "image_min_pixels", 32 * 32),
+            )["images"]
+            out = image_processor(images, return_tensors="pt")
+            mm_inputs.update(out)
+        return mm_inputs
+
     def process_messages(self, messages, images, videos, audios, processor):
-        if images and processor is not None:
-            image_processor = getattr(processor, "image_processor", processor)
-            merge_length = getattr(image_processor, "merge_size", 2) ** 2
-            
-            new_messages = deepcopy(messages)
-            img_idx = 0
-            for msg in new_messages:
-                if "<image>" in msg["content"]:
-                    grid = image_processor.make_grid_thw(images[img_idx])
-                    image_tokens_len = (grid[1] * grid[2]) // merge_length
-                    image_placeholder = "<|vision_start|>" + "<|image_pad|>" * image_tokens_len + "<|vision_end|>"
-                    msg["content"] = msg["content"].replace("<image>", image_placeholder, 1)
-                    img_idx += 1
-            return new_messages
-        
-        return messages
-    
+        if not images or processor is None:
+            return messages
+        self._validate_input(processor, images, videos, audios)
+        self._validate_messages(messages, images, videos, audios)
+        images_reg = self._regularize_images(
+            images,
+            image_max_pixels=getattr(processor, "image_max_pixels", 2304 * 2304),
+            image_min_pixels=getattr(processor, "image_min_pixels", 32 * 32),
+        )["images"]
+        image_sizes = [get_image_size(to_numpy_array(im)) for im in images_reg]
+        if not image_sizes:
+            return messages
+        vision_data = processor._get_num_multimodal_tokens(image_sizes=image_sizes)
+        batch_num_image_tokens = getattr(vision_data, "num_image_tokens", None)
+        if not batch_num_image_tokens:
+            return messages
+        new_messages = deepcopy(messages)
+        img_idx = 0
+        for msg in new_messages:
+            content = msg.get("content", "")
+            while IMAGE_PLACEHOLDER in content and img_idx < len(batch_num_image_tokens):
+                num_tokens = batch_num_image_tokens[img_idx]
+                image_placeholder = (
+                    "<|vision_start|>" + "<|image_pad|>" * num_tokens + "<|vision_end|>"
+                )
+                content = content.replace(IMAGE_PLACEHOLDER, image_placeholder, 1)
+                img_idx += 1
+            msg["content"] = content
+        return new_messages
+
+
 @dataclass
 class GLM4VPlugin(Qwen2VLPlugin):
     @override
