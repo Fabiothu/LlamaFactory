@@ -200,6 +200,18 @@ def patch_model(
     add_valuehead: bool,
 ) -> None:
     gen_config = model.generation_config  # check and fix generation config
+    if getattr(model.config, "model_type", None) == "Bee":
+        if gen_config.pad_token_id is None:
+            gen_config.pad_token_id = tokenizer.pad_token_id or model.config.pad_token_id
+
+        if gen_config.eos_token_id is None:
+            gen_config.eos_token_id = tokenizer.eos_token_id or model.config.eos_token_id
+
+        # mark special tokens (do not add new tokens)
+        for tok in ["<image>", "<video>"]:
+            if tok not in tokenizer.additional_special_tokens:
+                tokenizer.additional_special_tokens.append(tok)
+
     if not gen_config.do_sample and (
         (gen_config.temperature is not None and gen_config.temperature != 1.0)
         or (gen_config.top_p is not None and gen_config.top_p != 1.0)

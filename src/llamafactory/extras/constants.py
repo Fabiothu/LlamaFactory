@@ -188,7 +188,7 @@ register_model_group(
             DownloadSource.DEFAULT: "Open-Bee/Bee-8B-RL",
         },
     },
-    template="Bee",
+    template="bee",
     multimodal=True,
 )
 
